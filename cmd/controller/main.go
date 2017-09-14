@@ -6,9 +6,12 @@ package main
 
 import (
 	"github.com/tsuru/cloudstack-ingress-controller/controller"
+	"k8s.io/apiserver/pkg/server/healthz"
 )
 
 func main() {
-	dc := &controller.DummyController{}
+	dc := &controller.CloudstackController{
+		HealthzChecker: healthz.PingHealthz,
+	}
 	dc.Start()
 }

@@ -6,9 +6,9 @@ package controller
 
 import (
 	"log"
-	"net/http"
-	"os/exec"
 	"strings"
+
+	"k8s.io/apiserver/pkg/server/healthz"
 
 	"github.com/spf13/pflag"
 	api "k8s.io/api/core/v1"
@@ -16,12 +16,22 @@ import (
 	"k8s.io/ingress/core/pkg/ingress"
 	k8sctl "k8s.io/ingress/core/pkg/ingress/controller"
 	"k8s.io/ingress/core/pkg/ingress/defaults"
+	"k8s.io/ingress/core/pkg/ingress/store"
 )
 
-type DummyController struct{}
+var (
+	defIngressClass = "cloudstack"
+)
 
-func (dc DummyController) Start() {
-	ic := k8sctl.NewIngressController(dc)
+type CloudstackController struct {
+	healthz.HealthzChecker
+
+	nodeLister store.NodeLister
+	svcLister  store.ServiceLister
+}
+
+func (c *CloudstackController) Start() {
+	ic := k8sctl.NewIngressController(c)
 	defer func() {
 		log.Printf("Shutting down ingress controller...")
 		ic.Stop()
@@ -29,72 +39,65 @@ func (dc DummyController) Start() {
 	ic.Start()
 }
 
-func (dc DummyController) SetConfig(cfgMap *api.ConfigMap) {
-	log.Printf("Config map %+v", cfgMap)
+func (c *CloudstackController) SetConfig(cfgMap *api.ConfigMap) {
+	log.Printf("SetConfig: %+v", cfgMap)
 }
 
-func (dc DummyController) Test(file string) *exec.Cmd {
-	return exec.Command("echo", file)
-}
-
-func (dc DummyController) OnUpdate(updatePayload ingress.Configuration) error {
-	log.Printf("Received OnUpdate notification")
+func (c *CloudstackController) OnUpdate(updatePayload ingress.Configuration) error {
+	var services []string
 	for _, b := range updatePayload.Backends {
-		eps := []string{}
-		for _, e := range b.Endpoints {
-			eps = append(eps, e.Address)
-		}
-		log.Printf("%v: %v", b.Name, strings.Join(eps, ", "))
+		services = append(services, b.Name)
 	}
-
-	log.Printf("Reloaded new config")
+	log.Printf("[OnUpdate] Services: %s", strings.Join(services, ", "))
 	return nil
 }
 
-func (dc DummyController) BackendDefaults() defaults.Backend {
+func (c *CloudstackController) BackendDefaults() defaults.Backend {
 	return defaults.Backend{}
 }
 
-func (n DummyController) Name() string {
-	return "dummy Controller"
+func (c *CloudstackController) Name() string {
+	return "Cloudstack Controller"
 }
 
-func (n DummyController) Check(_ *http.Request) error {
-	return nil
-}
-
-func (dc DummyController) Info() *ingress.BackendInfo {
+func (c *CloudstackController) Info() *ingress.BackendInfo {
 	return &ingress.BackendInfo{
-		Name:       "dummy",
-		Release:    "0.0.0",
-		Build:      "git-00000000",
-		Repository: "git://foo.bar.com",
+		Name:       "cloudstack",
+		Release:    "0.0.1",
+		Repository: "git://github.com/tsuru/cloudstack-ingress-controller",
 	}
 }
 
-func (n DummyController) ConfigureFlags(*pflag.FlagSet) {
+func (c *CloudstackController) ConfigureFlags(p *pflag.FlagSet) {
 }
 
-func (n DummyController) OverrideFlags(*pflag.FlagSet) {
+func (c *CloudstackController) OverrideFlags(flags *pflag.FlagSet) {
+	ic, _ := flags.GetString("ingress-class")
+
+	if ic == "" {
+		ic = defIngressClass
+	}
+
+	flags.Set("ingress-class", ic)
 }
 
-func (n DummyController) SetListers(lister ingress.StoreLister) {
-
+func (c *CloudstackController) SetListers(lister ingress.StoreLister) {
+	c.nodeLister = lister.Node
+	c.svcLister = lister.Service
 }
 
-func (n DummyController) DefaultIngressClass() string {
-	return "dummy"
+func (c *CloudstackController) DefaultIngressClass() string {
+	return "cloudstack"
 }
 
-func (n DummyController) UpdateIngressStatus(*extensions.Ingress) []api.LoadBalancerIngress {
+// UpdateIngressStatus updates IP of the ingress based on the Cloudstack LoadBalancer
+func (c *CloudstackController) UpdateIngressStatus(ing *extensions.Ingress) []api.LoadBalancerIngress {
+	// get the ingress cloudstack VIP and add its IP to loadBalancerIngress
+
+	// data, err := json.Marshal(ing)
+	// if err != nil {
+	// 	log.Printf("err json UpdateIngressStatus %v", err)
+	// }
+	// log.Printf("UpdateIngressStatus: %s", data)
 	return nil
-}
-
-// DefaultEndpoint returns the default endpoint to be use as default server that returns 404.
-func (n DummyController) DefaultEndpoint() ingress.Endpoint {
-	return ingress.Endpoint{
-		Address: "127.0.0.1",
-		Port:    "8181",
-		Target:  &api.ObjectReference{},
-	}
 }
